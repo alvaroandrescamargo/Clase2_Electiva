@@ -1,0 +1,68 @@
+steps:
+
+- script: |
+    GREEN='\033[32m'
+    RED='\033[31m'
+    YELLOW='\033[33m'
+    BLUE='\033[34m'
+    fecha=$(date +%Y%m%d)
+
+    echo "##vso[task.setvariable variable=YELLOW]$YELLOW"
+    echo "##vso[task.setvariable variable=GREEN]$GREEN"
+    echo "##vso[task.setvariable variable=BLUE]$BLUE"
+    echo "##vso[task.setvariable variable=RED]$RED"
+    echo "##vso[task.setvariable variable=fecha]$fecha"
+    ls -ltra
+    cat .env
+  displayName: Defininedo Parametros
+
+- task: SonarQubePrepare@5
+  inputs:
+    SonarQube: '$(SONARQUBE_SERVICE_CONNECTION)'
+    scannerMode: 'CLI'
+    configMode: 'manual'
+    cliProjectKey: '$(SONARQUBE_PROJECT_KEY)'
+
+- script: |
+    sonar-scanner -Dsonar.projectKey=$(SONARQUBE_PROJECT_KEY)
+  displayName: 'Ejecutar análisis de SonarQube'
+
+- task: SonarQubePublish@5
+  displayName: 'Publicar Resultados de Quality Gate'
+  inputs:
+    pollingTimeoutSec: '300'
+
+- script: |
+    echo -e "\n${BLUE}=========="
+    echo -e "${BLUE}Compilando"
+    echo -e "${BLUE}==========\n"
+    npm install
+    npm run build 2>&1 | tee result.log | grep -q "del-cli exited with code 1" && exit 0
+  displayName: Compilando
+
+- script: |
+    echo -e "\n${BLUE}==================="
+    echo -e "${BLUE}Construyendo Imagen"
+    echo -e "${BLUE}===================\n"
+    docker build --no-cache -t $(Build.Repository.Name):$(fecha) .
+    
+    echo -e "\n${BLUE}================================="
+    echo -e "${BLUE}Eliminando Contenedores asociados"
+    echo -e "${BLUE}=================================\n"
+    docker rm -f $(Build.Repository.Name)
+
+    echo -e "\n${BLUE}========================="
+    echo -e "${BLUE}Lanzando Nuevo Contenedor"
+    echo -e "${BLUE}=========================\n"
+    docker run -d --restart=always --name $(Build.Repository.Name) -p 9090:9090 $(Build.Repository.Name):$(fecha)
+
+    echo -e "\n${BLUE}========================="
+    echo -e "${BLUE}Limpiando Cache"
+    echo -e "${BLUE}=========================\n"
+    docker builder prune -f
+
+    echo -e "\n${BLUE}========================="
+    echo -e "${BLUE}Listando Nuevo Contenedor"
+    echo -e "${BLUE}=========================\n"
+    docker ps | grep $(Build.Repository.Name)
+  displayName: Desplegando Backend
